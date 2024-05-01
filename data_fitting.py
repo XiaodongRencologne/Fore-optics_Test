@@ -1,7 +1,6 @@
 # %%
 from glob import glob
 from pathlib import PurePath
-
 import numpy as np
 
 import numpy.fft as fft
@@ -660,3 +659,4 @@ plt.xlabel(r'$\Delta z$ [mm]')
 plt.ylabel('fitting residual')
 
 plt.tight_layout()
+# %%

@@ -2,7 +2,9 @@
 import numpy as np
 #import matplotlib.pyplot as plt
 
-
+#def champOptics(win, din, f1, f2, Lm, S):
+     
+     
 
 
 

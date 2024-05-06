@@ -1,6 +1,6 @@
 # %%
 from glob import glob
-from pathlib import PurePath
+from pathlib import PurePath,Path
 
 import numpy as np
 import numpy.fft as fft
@@ -13,17 +13,14 @@ from emcee.autocorr import integrated_time
 import matplotlib.pyplot as plt
 import corner
 
-
+def get_mean_err(samples):
+    mean = samples.mean(axis=-1)
+    std = np.std(samples, axis=-1)
+    sample_N = samples.shape[1]
+    err =std/np.sqrt(sample_N-1)
+    return mean, err
 # %%
 class MCMC_Model():
-    @staticmethod
-    def get_mean_err(samples):
-        samples=samples/samples.mean(axis=0)
-        mean = samples.mean(axis=-1)
-        std = np.std(samples, axis=-1)
-        sample_N = samples.shape[1]
-        err =std/np.sqrt(sample_N-1)
-        return mean, err
     @staticmethod
     def poly_Model_2nd(
         z,
@@ -64,7 +61,7 @@ class MCMC_Model():
             )
         sw = np.asarray(sw)
         sw = sw.sum(axis=0)
-        return a*z**3 + b*z**2 + c*z + d + sw
+        return c + a*(z-b)**2 + d*z**3 +sw
     
     @staticmethod
     def sin_model(
@@ -74,19 +71,16 @@ class MCMC_Model():
         ):
         if type(params[0]) == np.ndarray:
             z=np.outer(z, np.ones_like(params[0]))
+        c=params[0]
         sw = []
         for i in range(sw_N):
-            amp, l, phi =params[3*i:3*(i+1)]
+            amp, l, phi =params[1+3*i:1+3*(i+1)]
             sw.append(
                 amp*np.sin(2*np.pi*(z/l)+phi)
             )
         sw = np.asarray(sw)
         sw = sw.sum(axis=0)
-        return sw
-    
-    @staticmethod
-
-        
+        return sw +c
     
     @staticmethod
     def _log_prior(param, bounds):
@@ -113,25 +107,25 @@ class MCMC_Model():
             model_label=""
         ) -> None:
         self.x_vec = x_vec
-        self.data_samp = data_samp
-        self.y_mean, self.y_err = self.get_mean_err(self.data_samp)
-
+        self.data_samp = data_samp - data_samp.mean(axis=0)
+        self.y_mean, self.y_err = get_mean_err(self.data_samp)
+        self.Model_order=Model_order
         self.sw_N= sw_N
         self.set_param_labels()
-
         if len(param_bounds) == self.param_N:
             self.param_bounds = param_bounds
         else:
             raise ValueError("param bounds is wrong!")
-        self.model_order=Model_order
+        
         self.model_label=model_label
         if Model_order == 2:
             self.model = self.poly_Model_2nd
         elif Model_order == 3:
             self.model = self.poly_Model_3rd
         elif Model_order == 'sin':
-            self.model = self.sin_Model
+            self.model = self.sin_model
 
+        
     def model_batch(self, params_sample):
         param_batch_list = [
             params_sample[:,idx] for idx in range(self.param_N)
@@ -146,7 +140,11 @@ class MCMC_Model():
             sw_labels += [ 
                 f'$A_{i}$', fr'$\lambda_{i}$', fr'$\phi_{i}$'
             ]
-        self.param_labels = alpha_beta[:self.model_order+1] + sw_labels
+        if isinstance(self.Model_order, int):
+            self.param_labels = alpha_beta[:self.Model_order+1] + sw_labels
+        else:
+            self.param_labels = [f'$C_{0}$'] + sw_labels
+        
         self.param_N = len(self.param_labels)
     
     def log_prob(self, param):
@@ -155,13 +153,23 @@ class MCMC_Model():
             self.x_vec, self.y_mean, self.y_err
         )
     
-    def sample(self, p_0, n_walkers, n_steps):
+    def sample(self, p_0, n_walkers, n_steps,filename='mcmc_analysis.h5',restart=True):
         bound_width = np.diff(self.param_bounds, axis=-1)[:,0]
         pos = p_0 + np.random.randn(n_walkers, self.param_N) * bound_width*0.01
 
+        if restart:
+            if Path(filename).is_file():
+                Path.unlink(Path(filename))
+
+        Path(filename).parents[0].mkdir(parents=True, exist_ok=True)
+        backend = emcee.backends.HDFBackend(filename)
+        
+
+        backend.reset(n_walkers,self.param_N)
+
         self.sampler = emcee.EnsembleSampler(
             n_walkers, self.param_N, 
-            self.log_prob,
+            self.log_prob, backend=backend
         )
         self.mcmc_res = self.sampler.run_mcmc(
             pos,
@@ -175,6 +183,14 @@ class MCMC_Model():
             discard=discard, thin=thin, flat=True
         )
         print(self.flat_samples.shape)
+
+    def read_mc_chain(self,filename):
+        reader = emcee.backends.HDFBackend(filename)
+        tau = reader.get_autocorr_time()
+        burnin = int(2* np.max(tau))
+        thin = int(0.5 * np.min(tau))
+        self.sample_chain
+
 
     def plot_chain(self,):
         fig, axes = plt.subplots(
@@ -225,7 +241,7 @@ class MCMC_Model():
         ) / (len(self.x_vec) // 2)
         fig = plt.figure(figsize=(12,10))
         plt.subplot(211)
-        mean, err = self.get_mean_err(fit_residual_samp)
+        mean, err = get_mean_err(fit_residual_samp)
         plt.errorbar(
             self.x_vec,
             mean,
@@ -242,7 +258,7 @@ class MCMC_Model():
         plt.ylabel('fitting residual')
 
         plt.subplot(212)
-        mean, err = self.get_mean_err(np.abs(fit_res_spectrum))
+        mean, err = get_mean_err(np.abs(fit_res_spectrum))
         plt.errorbar(
             1./freq,
             mean,

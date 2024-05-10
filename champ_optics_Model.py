@@ -185,11 +185,14 @@ class MCMC_Model():
         print(self.flat_samples.shape)
 
     def read_mc_chain(self,filename):
-        reader = emcee.backends.HDFBackend(filename)
-        tau = reader.get_autocorr_time()
+        self.sampler = emcee.backends.HDFBackend(filename)
+        tau = self.sampler.get_autocorr_time()
+        print(tau)
         burnin = int(2* np.max(tau))
         thin = int(0.5 * np.min(tau))
-        self.sample_chain
+        self.get_flatsamp(discard=burnin, thin=thin)
+        
+
 
 
     def plot_chain(self,):
@@ -278,6 +281,5 @@ class MCMC_Model():
 
         plt.tight_layout()
         return fig
-
     
 # %%
